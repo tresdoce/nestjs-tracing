@@ -1,19 +1,22 @@
 import { CallHandler, ExecutionContext, Injectable, NestInterceptor, Scope } from '@nestjs/common';
+import { HttpArgumentsHost } from '@nestjs/common/interfaces/features/arguments-host.interface';
 import { Reflector } from '@nestjs/core';
 import { Observable, tap } from 'rxjs';
 import { Request, Response } from 'express';
+import { Span, Tags } from 'opentracing';
 
 import { TracingService } from './tracing.service';
 import { markAsErroredSpan, SpanService } from './span.service';
 import { RequestContext } from './request-context';
 import { RequestSpanService } from './request-span.service';
 import { EXCEPT_TRACING_INTERCEPTOR } from './tracing.keys';
-import { Span, Tags } from 'opentracing';
 
 @Injectable({ scope: Scope.REQUEST })
 export class TracingInterceptor implements NestInterceptor {
-  private reflector: Reflector;
+  private url: string;
   private span: Span;
+  private reflector: Reflector = new Reflector();
+  private ctx: HttpArgumentsHost;
   private request: Request;
   private response: Response;
 
@@ -22,9 +25,7 @@ export class TracingInterceptor implements NestInterceptor {
     private readonly spanService: SpanService,
     private readonly requestContext: RequestContext,
     private readonly requestSpan: RequestSpanService,
-  ) {
-    this.reflector = new Reflector();
-  }
+  ) {}
 
   intercept(
     context: ExecutionContext,
@@ -35,9 +36,6 @@ export class TracingInterceptor implements NestInterceptor {
     if (except) return next.handle();
     if (!this.tracingService) return next.handle();
 
-    this.request = context.switchToHttp().getRequest();
-    this.response = context.switchToHttp().getResponse();
-    const url = this.request.path === '/' ? `${this.request.headers.host}` : `${this.request.path}`;
     const contextType = `${context.getType()}`;
     const constructorRef = `${context.getClass().name}`;
     const handlerRef = `${context.getHandler().name}`;
@@ -45,56 +43,63 @@ export class TracingInterceptor implements NestInterceptor {
 
     console.log('OPERATION: ', operation);
 
-    const parentSpanContext = this.tracingService.extractSpanFromHeaders(this.request.headers);
+    this.ctx = context.switchToHttp();
+    this.request = this.ctx.getRequest();
+    this.response = this.ctx.getResponse();
+    this.url = this.request.path === '/' ? `${this.request.headers.host}` : `${this.request.path}`;
+
+    const parentSpanContext = this.tracingService.getParentSpanOptions(this.request.headers);
+
     console.log('PARENT SPAN CONTEXT: ', parentSpanContext);
 
-    const parentObj = parentSpanContext
-      ? {
-          childOf: parentSpanContext,
-          tags: {
-            operation,
-            controller: constructorRef,
-            handler: handlerRef,
-            [Tags.COMPONENT]: contextType,
-            [Tags.SPAN_KIND]: Tags.SPAN_KIND_MESSAGING_PRODUCER,
-            [Tags.HTTP_METHOD]: this.request.method,
-            [Tags.HTTP_URL]: url,
-          },
-        }
-      : {
-          tags: {
-            operation,
-            controller: constructorRef,
-            handler: handlerRef,
-            [Tags.COMPONENT]: contextType,
-            [Tags.SPAN_KIND]: Tags.SPAN_KIND_MESSAGING_PRODUCER,
-            [Tags.HTTP_METHOD]: this.request.method,
-            [Tags.HTTP_URL]: url,
-          },
-        };
-
-    this.span = this.spanService.startActiveSpan(url, parentObj);
+    this.span = this.spanService.startActiveSpan(this.url, parentSpanContext);
+    this.span.addTags({
+      operation,
+      controller: constructorRef,
+      handler: handlerRef,
+      [Tags.COMPONENT]: contextType,
+      [Tags.SPAN_KIND]: Tags.SPAN_KIND_MESSAGING_PRODUCER,
+      [Tags.HTTP_METHOD]: this.request.method,
+      [Tags.HTTP_URL]: this.url,
+    });
     this.span.log({ event: 'request_received' });
-
-    console.log('SPAN: ', this.span);
 
     const responseHeaders = {};
     this.tracingService.setSpanContext(this.span, responseHeaders);
     this.response.set(responseHeaders);
-    Object.assign(this.request, { span: this.span });
+    //Object.assign(this.request, { span: this.span });
 
     if (!this.span) return next.handle();
-    //this.spanService.setSpanTags(this.span, this.request.headers);
+    this.tracingService.propagateSpanContext(this.request.headers);
+    this.spanService.setSpanTags(this.span, this.request.headers);
     this.tracingService.setSpanContext(this.span, this.request.headers);
     this.requestSpan.set(this.span);
 
+    const childSpan = this.spanService.startActiveSpan(this.url, {
+      childOf: this.span,
+    });
+    childSpan.addTags({
+      operation,
+      controller: constructorRef,
+      handler: handlerRef,
+      [Tags.COMPONENT]: contextType,
+      [Tags.SPAN_KIND]: Tags.SPAN_KIND_MESSAGING_PRODUCER,
+      [Tags.HTTP_METHOD]: this.request.method,
+      [Tags.HTTP_URL]: this.url,
+    });
+    childSpan.log({ event: 'request_received' });
+
     return next.handle().pipe(
       tap(() => {
+        childSpan.setTag(Tags.HTTP_STATUS_CODE, this.response.statusCode);
         this.span.setTag(Tags.HTTP_STATUS_CODE, this.response.statusCode);
+        childSpan.log({ event: 'response_received' });
         this.span.log({ event: 'response_received' });
         if (this.response.statusCode >= 500) {
+          markAsErroredSpan(childSpan);
           markAsErroredSpan(this.span);
         }
+        this.spanService.finishSpan(childSpan);
         this.spanService.finishSpan(this.span);
       }),
     );

@@ -27,8 +27,7 @@ export class TracingService implements OnModuleInit, OnModuleDestroy {
 
   /** Extract the span context from the request headers */
   extractSpanFromHeaders(headers: IncomingHttpHeaders): SpanContext | null | undefined {
-    this.spanContext = this.getTracer().extract(FORMAT_HTTP_HEADERS, headers) /*?? undefined*/;
-    return this.spanContext;
+    return this.getTracer().extract(FORMAT_HTTP_HEADERS, headers) ?? undefined;
   }
 
   /** Inject span to distributed */

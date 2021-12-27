@@ -8,8 +8,6 @@ import { IncomingHttpHeaders } from 'http';
 
 @Injectable()
 export class SpanService {
-  private tracing_tag: any = {};
-
   constructor(
     private readonly tracerService: TracingService,
     private readonly requestContext: RequestContext,
@@ -31,11 +29,14 @@ export class SpanService {
 
   /** Set tags span */
   setSpanTags(span: Span, headers: IncomingHttpHeaders): void {
+    let tracing_tag: any;
+    console.log('HEADERS: ', headers);
     if (headers && headers[TAGS.TRACING_TAG]) {
-      this.tracing_tag = JSON.parse(<string>headers[TAGS.TRACING_TAG]);
+      console.log('lo tomo');
+      tracing_tag = JSON.parse(<string>headers[TAGS.TRACING_TAG]);
     }
-    for (const key in this.tracing_tag) {
-      span.setTag(key, this.tracing_tag[key]);
+    for (const key in tracing_tag) {
+      span.setTag(key, tracing_tag[key]);
     }
   }
 
