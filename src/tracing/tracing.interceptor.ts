@@ -67,39 +67,22 @@ export class TracingInterceptor implements NestInterceptor {
     const responseHeaders = {};
     this.tracingService.setSpanContext(this.span, responseHeaders);
     this.response.set(responseHeaders);
-    //Object.assign(this.request, { span: this.span });
+    Object.assign(this.request, { span: this.span });
 
     if (!this.span) return next.handle();
     this.tracingService.propagateSpanContext(this.request.headers);
     this.spanService.setSpanTags(this.span, this.request.headers);
     this.tracingService.setSpanContext(this.span, this.request.headers);
+    this.tracingService.addTracingHeaders(this.request.headers);
     this.requestSpan.set(this.span);
-
-    const childSpan = this.spanService.startActiveSpan(this.url, {
-      childOf: this.span,
-    });
-    childSpan.addTags({
-      operation,
-      controller: constructorRef,
-      handler: handlerRef,
-      [Tags.COMPONENT]: contextType,
-      [Tags.SPAN_KIND]: Tags.SPAN_KIND_MESSAGING_PRODUCER,
-      [Tags.HTTP_METHOD]: this.request.method,
-      [Tags.HTTP_URL]: this.url,
-    });
-    childSpan.log({ event: 'request_received' });
 
     return next.handle().pipe(
       tap(() => {
-        childSpan.setTag(Tags.HTTP_STATUS_CODE, this.response.statusCode);
         this.span.setTag(Tags.HTTP_STATUS_CODE, this.response.statusCode);
-        childSpan.log({ event: 'response_received' });
         this.span.log({ event: 'response_received' });
         if (this.response.statusCode >= 500) {
-          markAsErroredSpan(childSpan);
           markAsErroredSpan(this.span);
         }
-        this.spanService.finishSpan(childSpan);
         this.spanService.finishSpan(this.span);
       }),
     );

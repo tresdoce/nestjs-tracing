@@ -1,6 +1,6 @@
 import { Injectable, NestMiddleware } from '@nestjs/common';
 import { NextFunction, Request, Response } from 'express';
-import { Tags } from 'opentracing';
+import { Span, Tags } from 'opentracing';
 import { RequestSpanService } from './request-span.service';
 import { RequestContext } from './request-context';
 import { markAsErroredSpan, SpanService } from './span.service';
@@ -9,7 +9,7 @@ import { TracingService } from './tracing.service';
 @Injectable()
 export class TracingMiddleware implements NestMiddleware {
   // master span instance, can have multiple child span inside
-  //private span: any = undefined;
+  private span: Span;
   //private spanChildren: any = undefined;
 
   constructor(
@@ -25,24 +25,31 @@ export class TracingMiddleware implements NestMiddleware {
 
       const url = req.path !== '/' ? `${req.baseUrl}${req.path}` : `${req.baseUrl}`;
 
-      const span = this.spanService.startActiveSpan(url, {
+      this.span = this.spanService.startActiveSpan(url, {
         childOf: parentSpanContext,
-        tags: {
-          [Tags.SPAN_KIND]: Tags.SPAN_KIND_MESSAGING_PRODUCER,
-          [Tags.HTTP_METHOD]: req.method,
-          [Tags.HTTP_URL]: url,
-        },
       });
+      this.span.addTags({
+        [Tags.SPAN_KIND]: Tags.SPAN_KIND_MESSAGING_PRODUCER,
+        [Tags.HTTP_METHOD]: req.method,
+        [Tags.HTTP_URL]: url,
+      });
+      this.span.log({ event: 'request_received' });
 
-      this.requestSpan.set(span);
+      //const responseHeaders = {};
+      //this.tracingService.setSpanContext(this.span, responseHeaders);
+      //res.set(responseHeaders);
+      //this.tracingService.addTracingHeaders(req.headers)
+      //Object.assign(req, { span: this.span });
+
+      this.requestSpan.set(this.span);
 
       res.once('finish', () => {
-        span.setTag(Tags.HTTP_STATUS_CODE, res.statusCode);
+        this.span.setTag(Tags.HTTP_STATUS_CODE, res.statusCode);
 
         if (res.statusCode >= 500) {
-          markAsErroredSpan(span);
+          markAsErroredSpan(this.span);
         }
-        this.spanService.finishSpan(span);
+        this.spanService.finishSpan(this.span);
       });
 
       next();

@@ -47,6 +47,11 @@ export class TracingService implements OnModuleInit, OnModuleDestroy {
     this.getTracer().inject(this.spanContext, FORMAT_HTTP_HEADERS, headers);
   }
 
+  /** Add tracing headers */
+  addTracingHeaders(headers: IncomingHttpHeaders): void {
+    console.log('HEADERS TRACING: ', headers);
+  }
+
   /** Initialize the Jaeger tracer. It can only by initialized once son multiple calls will have no effect */
   onModuleInit(): void {
     if (this.tracer) {

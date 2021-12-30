@@ -30,7 +30,7 @@ export class SpanService {
   /** Set tags span */
   setSpanTags(span: Span, headers: IncomingHttpHeaders): void {
     let tracing_tag: any;
-    console.log('HEADERS: ', headers);
+    console.log('HEADERS TAGS: ', headers);
     if (headers && headers[TAGS.TRACING_TAG]) {
       console.log('lo tomo');
       tracing_tag = JSON.parse(<string>headers[TAGS.TRACING_TAG]);

@@ -25,6 +25,8 @@ export const ACTIVE_SPAN = Symbol('ACTIVE_SPAN');
 
 export const REQUEST_SPAN = Symbol('REQUEST_SPAN');
 
+export const RESPONSE_SPAN = Symbol('RESPONSE_SPAN');
+
 export const TAGS = {
   ...Tags,
   PROTOCAL: 'protocal',
