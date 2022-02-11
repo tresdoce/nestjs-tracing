@@ -1,16 +1,13 @@
-import { CallHandler, ExecutionContext, Injectable, NestInterceptor, Scope } from '@nestjs/common';
-import { HttpArgumentsHost } from '@nestjs/common/interfaces/features/arguments-host.interface';
 import { Reflector } from '@nestjs/core';
+import { CallHandler, ExecutionContext, Injectable, NestInterceptor, Scope } from '@nestjs/common';
+import { Span } from '@opentelemetry/api';
+import { HttpArgumentsHost } from '@nestjs/common/interfaces/features/arguments-host.interface';
 import { Observable, tap } from 'rxjs';
 import { Request, Response } from 'express';
-import { Span, Tags } from 'opentracing';
-
-import { TracingService } from './tracing.service';
-import { markAsErroredSpan, SpanService } from './span.service';
-import { RequestContext } from './request-context';
-import { RequestSpanService } from './request-span.service';
-import { EXCEPT_TRACING_INTERCEPTOR } from './tracing.keys';
-
+// import { TracingService, markAsErroredSpan } from '../services/tracing.service';
+import { TracingService } from '../services/tracing.service';
+import { EXCEPT_TRACING_INTERCEPTOR } from '../constants/tracing.constants';
+import * as Tags from '../constants/tags.constants';
 @Injectable({ scope: Scope.REQUEST })
 export class TracingInterceptor implements NestInterceptor {
   private url: string;
@@ -20,40 +17,29 @@ export class TracingInterceptor implements NestInterceptor {
   private request: Request;
   private response: Response;
 
-  constructor(
-    private readonly tracingService: TracingService,
-    private readonly spanService: SpanService,
-    private readonly requestContext: RequestContext,
-    private readonly requestSpan: RequestSpanService,
-  ) {}
+  constructor(private readonly tracingService: TracingService) {}
 
   intercept(
     context: ExecutionContext,
     next: CallHandler,
   ): Observable<any> | Promise<Observable<any>> {
     const except = this.reflector.get<boolean>(EXCEPT_TRACING_INTERCEPTOR, context.getHandler());
-
     if (except) return next.handle();
-    if (!this.tracingService) return next.handle();
 
     const contextType = `${context.getType()}`;
     const constructorRef = `${context.getClass().name}`;
     const handlerRef = `${context.getHandler().name}`;
     const operation = [contextType, constructorRef, handlerRef].join(':');
 
-    console.log('OPERATION: ', operation);
-
     this.ctx = context.switchToHttp();
     this.request = this.ctx.getRequest();
     this.response = this.ctx.getResponse();
-    this.url = this.request.path === '/' ? `${this.request.headers.host}` : `${this.request.path}`;
 
+    this.url = this.request.path === '/' ? `${this.request.headers.host}` : `${this.request.path}`;
     const parentSpanContext = this.tracingService.getParentSpanOptions(this.request.headers);
 
-    console.log('PARENT SPAN CONTEXT: ', parentSpanContext);
-
-    this.span = this.spanService.startActiveSpan(this.url, parentSpanContext);
-    this.span.addTags({
+    this.span = this.tracingService.startActiveSpan(this.url, parentSpanContext);
+    this.span.setAttributes({
       operation,
       controller: constructorRef,
       handler: handlerRef,
@@ -62,28 +48,25 @@ export class TracingInterceptor implements NestInterceptor {
       [Tags.HTTP_METHOD]: this.request.method,
       [Tags.HTTP_URL]: this.url,
     });
-    this.span.log({ event: 'request_received' });
 
+    this.span.addEvent('request_received');
     const responseHeaders = {};
-    this.tracingService.setSpanContext(this.span, responseHeaders);
+    this.tracingService.setSpanContext(responseHeaders);
     this.response.set(responseHeaders);
     Object.assign(this.request, { span: this.span });
 
     if (!this.span) return next.handle();
     this.tracingService.propagateSpanContext(this.request.headers);
-    this.spanService.setSpanTags(this.span, this.request.headers);
-    this.tracingService.setSpanContext(this.span, this.request.headers);
-    this.tracingService.addTracingHeaders(this.request.headers);
-    this.requestSpan.set(this.span);
-
+    this.tracingService.setSpanTags(this.span, this.request.headers);
+    this.tracingService.setSpanContext(this.request.headers);
     return next.handle().pipe(
       tap(() => {
-        this.span.setTag(Tags.HTTP_STATUS_CODE, this.response.statusCode);
-        this.span.log({ event: 'response_received' });
-        if (this.response.statusCode >= 500) {
-          markAsErroredSpan(this.span);
-        }
-        this.spanService.finishSpan(this.span);
+        this.span.setAttribute(Tags.HTTP_STATUS_CODE, this.response.statusCode);
+        this.span.addEvent('response_received');
+        // if (this.response.statusCode >= 500) {
+        //   markAsErroredSpan(this.span);
+        // }
+        this.span.end();
       }),
     );
   }

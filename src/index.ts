@@ -1,9 +1,5 @@
-export * from './tracing/tracing.interceptor';
-export * from './tracing/request-context';
-export * from './tracing/tracing.service';
-export * from './tracing/tracing.keys';
-export * from './tracing/tracing.module';
-export * from './tracing/tracing.middleware';
-export * from './tracing/request-span.service';
-export * from './tracing/span.service';
-export * from './tracing/tracing-initialization.error';
+export { TracingModule } from './tracing/tracing.module';
+export { TracingService } from './tracing/services/tracing.service';
+export { TracingInterceptor } from './tracing/interceptors/tracing.interceptor';
+export { OpenTelemetryConfiguration } from './tracing/interfaces/tracing.interface';
+export { otelSDK } from './tracing/constants/open-telemetry.constants';
